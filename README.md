@@ -11,7 +11,7 @@ Build an MVP for the golf match hosting app with the following core features:
 - **Future features and enhancements will be added after the MVP is built.**  
 
 ---
-asad
+
 ## Tech Stack  
 - **Frontend:** React Native with Expo
 - **Backend:** Firebase (Real-time database syncing, Authentication, Cloud Functions)
