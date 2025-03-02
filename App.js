@@ -3,7 +3,7 @@ import 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity, LogBox } from 'react-native';
 import { getFirebaseAuth } from './src/config/initializeFirebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import ErrorBoundary from './src/components/ErrorBoundary';
@@ -20,6 +20,38 @@ import Profile from './src/screens/Profile';
 import Search from './src/screens/SearchScreen';
 
 const Stack = createNativeStackNavigator();
+
+// Set up a global error handler that works in Expo
+const setupErrorHandler = () => {
+  // Ignore specific warnings that might be noisy
+  LogBox.ignoreLogs([
+    'Non-serializable values were found in the navigation state',
+  ]);
+
+  // Set up error logging
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    // Log the error with a timestamp
+    const timestamp = new Date().toISOString();
+    originalConsoleError(`[${timestamp}] ERROR:`, ...args);
+    
+    // You could add additional error reporting here
+    // For example, sending to a service like Sentry
+  };
+  
+  // Handle promise rejections
+  const handlePromiseRejection = (event) => {
+    console.error('Unhandled Promise Rejection:', event.reason);
+  };
+  
+  // Add event listener for unhandled promise rejections
+  if (global.addEventListener) {
+    global.addEventListener('unhandledrejection', handlePromiseRejection);
+  }
+};
+
+// Call the setup function
+setupErrorHandler();
 
 export default function App() {
   const [user, setUser] = useState(null);

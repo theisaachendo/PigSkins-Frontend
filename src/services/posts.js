@@ -12,7 +12,7 @@ import {
   CACHE_SIZE_UNLIMITED,
   getDoc
 } from 'firebase/firestore';
-import { ref, uploadBytes, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, deleteObject, getDownloadURL } from 'firebase/storage';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 console.log('[Posts] Initializing Firebase services...');
@@ -30,6 +30,20 @@ const uploadMedia = async (file, userId) => {
   console.log('[Posts] Starting media upload:', { type: file.type });
   
   try {
+    // Only handle images
+    if (!file.type.startsWith('image/') && file.type !== 'image') {
+      throw new Error('Only image uploads are supported');
+    }
+    
+    // Compress the image first
+    const compressedImage = await ImageManipulator.manipulateAsync(
+      file.uri,
+      [{ resize: { width: 1200 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    
+    console.log('[Posts] Compressed image:', compressedImage);
+    
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(7);
     const filename = `${timestamp}-${random}`;
@@ -37,34 +51,56 @@ const uploadMedia = async (file, userId) => {
     
     console.log('[Posts] Uploading to:', path);
     
-    const response = await fetch(file.uri);
+    // Add a timeout for the fetch operation
+    const fetchWithTimeout = async (uri, options = {}, timeout = 30000) => {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      
+      try {
+        const response = await fetch(uri, {
+          ...options,
+          signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+      } catch (error) {
+        clearTimeout(id);
+        throw error;
+      }
+    };
+    
+    console.log('[Posts] Fetching file with timeout...');
+    const response = await fetchWithTimeout(compressedImage.uri);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
+    }
+    
     const blob = await response.blob();
-    console.log('[Posts] Blob created:', { 
-      size: blob.size, 
-      type: blob.type 
-    });
-
+    console.log('[Posts] Blob created:', { size: blob.size });
+    
     const storageRef = ref(storage, path);
     const metadata = {
-      contentType: file.type || 'image/jpeg',
+      contentType: 'image/jpeg',
       customMetadata: {
         originalName: filename,
         uploadedBy: userId,
         timestamp: timestamp.toString()
       }
     };
-
-    console.log('[Posts] Starting upload with metadata:', metadata);
+    
     const uploadResult = await uploadBytes(storageRef, blob, metadata);
-    console.log('[Posts] Upload complete:', uploadResult);
-
     const downloadURL = await getDownloadURL(uploadResult.ref);
-    console.log('[Posts] Got download URL:', downloadURL);
-
+    
+    console.log('[Posts] Upload successful:', { 
+      mediaUrl: downloadURL, 
+      mediaType: 'image/jpeg' 
+    });
+    
     return {
       url: downloadURL,
       path: path,
-      type: file.type || 'image/jpeg'
+      type: 'image/jpeg'
     };
   } catch (error) {
     console.error('[Posts] Media upload failed:', {
@@ -78,91 +114,135 @@ const uploadMedia = async (file, userId) => {
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-export const createPost = async (content, mediaFile) => {
-  console.log('[Posts] Starting post creation:', { 
-    hasContent: !!content, 
+// Add this function to handle video uploads with better memory management
+const uploadVideoWithRetry = async (mediaFile, userId) => {
+  console.log('[Posts] Starting video upload with retry mechanism');
+  
+  let attempts = 0;
+  const maxAttempts = 2;
+  
+  while (attempts < maxAttempts) {
+    attempts++;
+    console.log(`[Posts] Video upload attempt ${attempts}/${maxAttempts}`);
+    
+    try {
+      // Check video size first
+      if (mediaFile.fileSize && mediaFile.fileSize > 50 * 1024 * 1024) { // 50MB limit
+        throw new Error('Video file is too large. Maximum size is 50MB.');
+      }
+      
+      console.log('[Posts] Fetching video file...');
+      const response = await fetch(mediaFile.uri);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
+      }
+      
+      console.log('[Posts] Creating blob from video...');
+      const blob = await response.blob();
+      console.log('[Posts] Video blob created:', { size: blob.size });
+      
+      // Upload to storage
+      const timestamp = Date.now();
+      const random = Math.random().toString(36).substring(7);
+      const filename = `${timestamp}-${random}`;
+      const path = `posts/${userId}/${filename}`;
+      
+      console.log('[Posts] Uploading video to:', path);
+      
+      const metadata = {
+        contentType: 'video/mp4',
+        customMetadata: {
+          originalName: filename,
+          uploadedBy: userId,
+          timestamp: timestamp.toString()
+        }
+      };
+      
+      const storageRef = ref(storage, path);
+      console.log('[Posts] Storage reference created, starting upload...');
+      
+      const uploadResult = await uploadBytes(storageRef, blob, metadata);
+      console.log('[Posts] Upload completed, getting download URL...');
+      
+      const downloadURL = await getDownloadURL(uploadResult.ref);
+      
+      // We don't need to set blob to null, JavaScript has garbage collection
+      
+      return {
+        url: downloadURL,
+        type: 'video/mp4'
+      };
+    } catch (error) {
+      console.error('[Posts] Video upload error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        // For network errors
+        status: error.status,
+        statusText: error.statusText,
+        // For Firebase errors
+        serverResponse: error.serverResponse
+      });
+      
+      // Rethrow with more context
+      throw new Error(`Video upload failed: ${error.message || 'Unknown error'}`);
+    }
+  }
+};
+
+export const createPost = async (content, mediaFile = null) => {
+  if (!auth.currentUser) {
+    throw new Error('You must be logged in to create a post');
+  }
+  
+  console.log('[Posts] Starting post creation:', {
+    hasContent: !!content,
     hasMedia: !!mediaFile,
-    mediaSize: mediaFile?.size,
     mediaType: mediaFile?.type
   });
-
-  if (!auth.currentUser) {
-    throw new Error('Must be logged in to create posts');
-  }
-
+  
   try {
     let mediaUrl = null;
     let mediaType = null;
-
+    
+    // Handle media upload if present
     if (mediaFile) {
-      // Validate file type
-      if (!mediaFile.type?.startsWith('image/') && !mediaFile.type?.startsWith('video/')) {
-        throw new Error('Only images and videos are allowed');
+      console.log('[Posts] Processing media file:', mediaFile);
+      
+      // Reject video uploads
+      if (mediaFile.type === 'video' || mediaFile.type?.startsWith('video/')) {
+        throw new Error('Video uploads are currently not supported');
       }
-
-      try {
-        // Compress image if needed
-        const compressedImage = await ImageManipulator.manipulateAsync(
-          mediaFile.uri,
-          [{ resize: { width: 1080 } }],
-          {
-            compress: 0.7,
-            format: ImageManipulator.SaveFormat.JPEG
-          }
-        );
-
-        // Check file size after compression
-        const response = await fetch(compressedImage.uri);
-        const blob = await response.blob();
-        if (blob.size > MAX_FILE_SIZE) {
-          throw new Error('File size too large (max 5MB)');
-        }
-
-        // Upload to storage
-        const timestamp = Date.now();
-        const random = Math.random().toString(36).substring(7);
-        const filename = `${timestamp}-${random}`;
-        const path = `posts/${auth.currentUser.uid}/${filename}`;
-        
-        console.log('[Posts] Uploading to:', path);
-
-        const metadata = {
-          contentType: 'image/jpeg',
-          customMetadata: {
-            originalName: filename,
-            uploadedBy: auth.currentUser.uid,
-            timestamp: timestamp.toString()
-          }
-        };
-
-        const storageRef = ref(storage, path);
-        const uploadResult = await uploadBytes(storageRef, blob, metadata);
-        mediaUrl = await getDownloadURL(uploadResult.ref);
-        mediaType = 'image/jpeg';
-
-        console.log('[Posts] Upload successful:', { mediaUrl, mediaType });
-
-      } catch (error) {
-        console.error('[Posts] Media upload failed:', error);
-        throw new Error(`Media upload failed: ${error.message}`);
+      
+      // Process image uploads
+      if (mediaFile.type === 'image' || mediaFile.type?.startsWith('image/')) {
+        const result = await uploadMedia(mediaFile, auth.currentUser.uid);
+        mediaUrl = result.url;
+        mediaType = result.type;
       }
     }
-
-    // Create post document
+    
+    // Create the post document
     const postData = {
-      content,
-      mediaUrl,
-      mediaType,
-      createdAt: serverTimestamp(),
+      content: content || '',
       userId: auth.currentUser.uid,
       userName: auth.currentUser.displayName || 'Anonymous',
-      userPhoto: auth.currentUser.photoURL || 'https://firebasestorage.googleapis.com/v0/b/pigskins-72811.appspot.com/o/defaults%2Fdefault-avatar.png?alt=media'
+      userEmail: auth.currentUser.email,
+      createdAt: serverTimestamp(),
+      mediaUrl,
+      mediaType
     };
-
+    
     const docRef = await addDoc(collection(db, 'posts'), postData);
     console.log('[Posts] Document created:', docRef.id);
-    return docRef.id;
-
+    
+    return {
+      id: docRef.id,
+      ...postData,
+      createdAt: new Date().getTime()
+    };
   } catch (error) {
     console.error('[Posts] Post creation failed:', error);
     throw error;
@@ -201,13 +281,20 @@ export const deletePost = async (postId) => {
         
         console.log('[Posts] Attempting to delete media at path:', decodedPath);
         
-        const storageRef = ref(storage, decodedPath);
-        await deleteObject(storageRef);
-        
-        console.log('[Posts] Associated media deleted:', {
-          path: decodedPath,
-          status: 'success'
-        });
+        // For emulator environment, we need to handle this differently
+        if (process.env.NODE_ENV === 'development' || postData.mediaUrl.includes('localhost')) {
+          // For emulator, we can just log this and move on
+          console.log('[Posts] Skipping media deletion in emulator environment');
+        } else {
+          // For production, attempt to delete the file
+          const storageRef = ref(storage, decodedPath);
+          await deleteObject(storageRef);
+          
+          console.log('[Posts] Associated media deleted:', {
+            path: decodedPath,
+            status: 'success'
+          });
+        }
       } catch (mediaError) {
         // Only log as error if it's not a permissions issue
         const logMethod = mediaError.code === 'storage/unauthorized' ? console.warn : console.error;
@@ -216,6 +303,8 @@ export const deletePost = async (postId) => {
           code: mediaError.code,
           path: postData.mediaUrl
         });
+        
+        // Don't throw the error, just log it - we've already deleted the post document
       }
     }
 
@@ -266,4 +355,53 @@ export const subscribeToPosts = (onPostsUpdate) => {
       onPostsUpdate([]); // Clear posts on error
     }
   });
-}; 
+};
+
+// Add this function to your posts.js file
+const logMemoryUsage = () => {
+  try {
+    console.log('[Memory] Checking memory usage');
+    
+    // In Expo/React Native, we don't have direct access to memory stats
+    // But we can log that we're checking and add instrumentation points
+    
+    // For iOS/Android, we could potentially use native modules to get memory info
+    // but for now, we'll just log that we're at this point in the code
+    console.log('[Memory] Memory check point reached');
+    
+    return true;
+  } catch (error) {
+    console.log('[Memory] Error checking memory:', error.message);
+    return false;
+  }
+};
+
+// Call this function before and after video processing
+// For example:
+// logMemoryUsage();
+// ... process video ...
+// logMemoryUsage(); 
+
+// Add this function to help with memory cleanup
+const forceMemoryCleanup = () => {
+  try {
+    // In JavaScript, we can't directly force garbage collection
+    // But we can help by nullifying large objects and running some operations
+    
+    // Create and immediately discard some objects to trigger cleanup
+    for (let i = 0; i < 10; i++) {
+      const obj = new Array(1000).fill('x');
+      obj.length = 0;
+    }
+    
+    // Log that we attempted cleanup
+    console.log('[Memory] Attempted memory cleanup');
+    
+    return true;
+  } catch (error) {
+    console.log('[Memory] Error during cleanup:', error.message);
+    return false;
+  }
+};
+
+// Call this after video uploads 

@@ -1,73 +1,150 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
-import { Video } from 'expo-av';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { auth } from '../../config/firebase';
+import { useState, useEffect } from 'react';
+import { deletePost } from '../../services/posts';
 
-const PostCard = ({ post, onDelete }) => {
-  const isOwner = auth.currentUser?.uid === post.userId;
+const PostCard = ({ post, currentUserId }) => {
+  const [deleting, setDeleting] = useState(false);
+  
+  const isOwnPost = post.userId === currentUserId;
+  
+  // Add logging when component mounts
+  useEffect(() => {
+    console.log('[PostCard] Rendering post:', { 
+      postId: post.id,
+      postUserId: post.userId,
+      currentUserId,
+      isOwnPost,
+      content: post.content?.substring(0, 20) + (post.content?.length > 20 ? '...' : '')
+    });
+  }, []);
+  
+  const handleDelete = async () => {
+    if (deleting) return;
+    
+    console.log('[PostCard] Delete button pressed for post:', post.id);
+    
+    // Add confirmation dialog
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => console.log('[PostCard] Delete cancelled')
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('[PostCard] Confirmed delete for post:', post.id);
+              setDeleting(true);
+              await deletePost(post.id);
+              console.log('[PostCard] Delete successful for post:', post.id);
+              // The post will be removed from the UI via the posts subscription
+            } catch (error) {
+              console.error('[PostCard] Error deleting post:', error);
+              setDeleting(false);
+              Alert.alert('Error', 'Failed to delete post');
+            }
+          }
+        }
+      ]
+    );
+  };
   
   const renderMedia = () => {
     if (!post.mediaUrl) return null;
-
-    if (post.mediaType?.startsWith('image')) {
-      return (
-        <Image 
+    
+    // Only handle images
+    return (
+      <View style={styles.mediaContainer}>
+        <Image
           source={{ uri: post.mediaUrl }}
           style={styles.media}
           resizeMode="cover"
         />
-      );
-    }
-
-    if (post.mediaType?.startsWith('video')) {
-      return (
-        <Video
-          source={{ uri: post.mediaUrl }}
-          style={styles.media}
-          useNativeControls
-          resizeMode="cover"
-        />
-      );
+      </View>
+    );
+  };
+  
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return 'Just now';
+    
+    try {
+      // Simple timestamp formatting without date-fns
+      const now = new Date();
+      const postDate = new Date(timestamp);
+      const diffMs = now - postDate;
+      
+      // Convert to seconds, minutes, hours, days
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+      const diffDay = Math.floor(diffHour / 24);
+      
+      if (diffDay > 0) {
+        return diffDay === 1 ? 'yesterday' : `${diffDay} days ago`;
+      } else if (diffHour > 0) {
+        return `${diffHour} ${diffHour === 1 ? 'hour' : 'hours'} ago`;
+      } else if (diffMin > 0) {
+        return `${diffMin} ${diffMin === 1 ? 'minute' : 'minutes'} ago`;
+      } else {
+        return 'just now';
+      }
+    } catch (error) {
+      console.error('[PostCard] Error formatting timestamp:', error);
+      return 'Recently';
     }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Image 
-          source={{ uri: post.userAvatar || 'https://via.placeholder.com/40' }}
-          style={styles.avatar}
-        />
-        <View style={styles.headerText}>
-          <Text style={styles.username}>{post.userName}</Text>
-          <Text style={styles.timestamp}>
-            {new Date(post.createdAt).toLocaleDateString()}
-          </Text>
+        <View style={styles.userInfo}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{post.userName?.[0] || '?'}</Text>
+          </View>
+          <View>
+            <Text style={styles.userName}>{post.userName || 'Anonymous'}</Text>
+            <Text style={styles.timestamp}>{formatTimestamp(post.createdAt)}</Text>
+          </View>
         </View>
-        {isOwner && (
+        
+        {isOwnPost && (
           <TouchableOpacity 
-            onPress={() => onDelete(post.id)}
             style={styles.deleteButton}
+            onPress={handleDelete}
+            disabled={deleting}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="trash-outline" size={20} color="#ef4444" />
+            <Ionicons name="trash-outline" size={20} color="#94a3b8" />
           </TouchableOpacity>
         )}
       </View>
       
-      <Text style={styles.content}>{post.content}</Text>
+      {post.content && (
+        <Text style={styles.content}>{post.content}</Text>
+      )}
+      
       {renderMedia()}
       
       <View style={styles.actions}>
         <TouchableOpacity style={styles.actionButton}>
-          <Ionicons name="heart-outline" size={24} color="#94a3b8" />
-          <Text style={styles.actionText}>0</Text>
+          <Ionicons name="heart-outline" size={20} color="#64748b" />
+          <Text style={styles.actionText}>Like</Text>
         </TouchableOpacity>
+        
         <TouchableOpacity style={styles.actionButton}>
-          <Ionicons name="chatbubble-outline" size={24} color="#94a3b8" />
-          <Text style={styles.actionText}>0</Text>
+          <Ionicons name="chatbubble-outline" size={20} color="#64748b" />
+          <Text style={styles.actionText}>Comment</Text>
         </TouchableOpacity>
+        
         <TouchableOpacity style={styles.actionButton}>
-          <Ionicons name="share-social-outline" size={24} color="#94a3b8" />
+          <Ionicons name="share-outline" size={20} color="#64748b" />
+          <Text style={styles.actionText}>Share</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -89,26 +166,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     marginRight: 12,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerText: {
-    flex: 1,
-  },
-  username: {
+  avatarText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  timestamp: {
-    color: '#94a3b8',
-    fontSize: 12,
-  },
-  deleteButton: {
-    padding: 8,
+  userName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   content: {
     color: '#fff',
@@ -122,19 +201,35 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 12,
   },
+  mediaContainer: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
   actions: {
     flexDirection: 'row',
-    gap: 24,
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginTop: 8,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
   actionText: {
+    color: '#64748b',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  timestamp: {
     color: '#94a3b8',
-    fontSize: 14,
+    fontSize: 12,
+  },
+  deleteButton: {
+    padding: 8,
+    marginLeft: 'auto',
+    opacity: 0.8,
   },
 });
 
