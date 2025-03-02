@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   View, 
   TextInput, 
@@ -17,44 +17,103 @@ const CreatePost = ({ onSuccess }) => {
   const [media, setMedia] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const pickMedia = async (type = 'image') => {
+  // Request permissions when the component mounts
+  useEffect(() => {
+    const requestPermissions = async () => {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please allow access to your media library.');
+      }
+    };
+
+    requestPermissions();
+  }, []);
+
+  const pickMedia = async () => {
+    console.log('[CreatePost] Picking image');
+    
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: type === 'image' 
-          ? ImagePicker.MediaTypeOptions.Images
-          : ImagePicker.MediaTypeOptions.Videos,
+      // Only allow images
+      const options = {
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
         allowsEditing: true,
-        quality: 1,
-      });
+        aspect: [4, 3],
+      };
+      
+      const result = await ImagePicker.launchImageLibraryAsync(options);
+
+      console.log('[CreatePost] Media selection result:', result);
 
       if (!result.canceled) {
+        const assetType = result.assets[0].type || 'image/jpeg';
+        
         setMedia({
           uri: result.assets[0].uri,
-          type: result.assets[0].type,
+          type: assetType,
+          fileSize: result.assets[0].fileSize,
         });
+        console.log('[CreatePost] Media set:', { 
+          uri: result.assets[0].uri, 
+          type: assetType,
+          fileSize: result.assets[0].fileSize
+        });
+      } else {
+        console.log('[CreatePost] Media selection was canceled');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick media');
+      console.error('[CreatePost] Error picking media:', error);
+      Alert.alert('Error', 'Failed to pick image');
     }
   };
 
   const handleSubmit = async () => {
-    if (!content.trim()) {
-      Alert.alert('Error', 'Please enter some content');
+    if (!content.trim() && !media) {
+      Alert.alert('Error', 'Please add some content or an image to your post');
       return;
     }
 
     setLoading(true);
+    
     try {
       await createPost(content, media);
+      
+      // Reset form
       setContent('');
       setMedia(null);
-      onSuccess?.();
-    } catch (error) {
-      Alert.alert('Error', error.message);
-    } finally {
       setLoading(false);
+      
+      // Call success callback if provided
+      if (onSuccess) {
+        onSuccess();
+      }
+      
+      Alert.alert('Success', 'Your post has been created!');
+    } catch (error) {
+      console.error('[CreatePost] Error creating post:', error);
+      setLoading(false);
+      Alert.alert('Error', error.message || 'Failed to create post');
     }
+  };
+
+  const renderMediaPreview = () => {
+    if (!media) return null;
+    
+    return (
+      <View style={styles.mediaPreviewContainer}>
+        <Image
+          source={{ uri: media.uri }}
+          style={styles.mediaPreview}
+          resizeMode="cover"
+        />
+        <TouchableOpacity 
+          style={styles.removeMedia}
+          onPress={() => setMedia(null)}
+        >
+          <Ionicons name="close-circle" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    );
   };
 
   return (
@@ -68,39 +127,15 @@ const CreatePost = ({ onSuccess }) => {
         onChangeText={setContent}
       />
       
-      {media && (
-        <View style={styles.mediaPreview}>
-          {media.type === 'image' ? (
-            <Image source={{ uri: media.uri }} style={styles.mediaPreview} />
-          ) : (
-            <Video
-              source={{ uri: media.uri }}
-              style={styles.mediaPreview}
-              useNativeControls
-            />
-          )}
-          <TouchableOpacity 
-            style={styles.removeMedia}
-            onPress={() => setMedia(null)}
-          >
-            <Ionicons name="close-circle" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      )}
+      {renderMediaPreview()}
 
       <View style={styles.actions}>
         <View style={styles.mediaButtons}>
           <TouchableOpacity 
             style={styles.mediaButton}
-            onPress={() => pickMedia('image')}
+            onPress={pickMedia}
           >
             <Ionicons name="image-outline" size={24} color="#94a3b8" />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.mediaButton}
-            onPress={() => pickMedia('video')}
-          >
-            <Ionicons name="videocam-outline" size={24} color="#94a3b8" />
           </TouchableOpacity>
         </View>
         
@@ -118,23 +153,34 @@ const CreatePost = ({ onSuccess }) => {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#171717',
+    backgroundColor: '#fff',
+    borderRadius: 8,
     padding: 16,
-    borderRadius: 12,
-    marginHorizontal: 12,
-    marginVertical: 8,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   input: {
-    color: '#fff',
     fontSize: 16,
-    minHeight: 100,
+    color: '#1e293b',
+    minHeight: 80,
     textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  mediaPreviewContainer: {
+    position: 'relative',
+    marginBottom: 16,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   mediaPreview: {
     width: '100%',
     height: 200,
     borderRadius: 8,
-    marginVertical: 12,
+    backgroundColor: '#f1f5f9',
   },
   removeMedia: {
     position: 'absolute',
@@ -147,23 +193,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
   },
   mediaButtons: {
     flexDirection: 'row',
-    gap: 12,
   },
   mediaButton: {
-    padding: 8,
+    marginRight: 16,
   },
   submitButton: {
-    backgroundColor: '#6366f1',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: '#3b82f6',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
   },
   submitButtonDisabled: {
-    opacity: 0.5,
+    backgroundColor: '#94a3b8',
   },
   submitButtonText: {
     color: '#fff',

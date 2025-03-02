@@ -4,14 +4,21 @@ import { subscribeToPosts, deletePost } from '../../services/posts';
 import PostCard from './PostCard';
 import CreatePost from './CreatePost';
 import { Ionicons } from '@expo/vector-icons';
+import { getFirebaseAuth } from '../../config/initializeFirebase';
 
 const PostList = () => {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-
+  
+  // Get the current user ID directly from Firebase Auth
+  const auth = getFirebaseAuth();
+  const currentUserId = auth.currentUser?.uid;
+  
   useEffect(() => {
+    console.log('[PostList] Current user ID:', currentUserId);
+    
     let mounted = true;
     
     const loadPosts = () => {
@@ -89,22 +96,34 @@ const PostList = () => {
   }
 
   return (
-    <FlatList
-      data={posts}
-      renderItem={({ item }) => (
-        <PostCard post={item} onDelete={handleDelete} />
-      )}
-      keyExtractor={item => item.id}
-      ListHeaderComponent={<CreatePost />}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          tintColor="#6366f1"
-        />
-      }
-      contentContainerStyle={styles.container}
-    />
+    <View style={styles.container}>
+      <FlatList
+        data={posts}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <PostCard 
+            post={item} 
+            currentUserId={currentUserId} 
+            onDelete={handleDelete} 
+          />
+        )}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#6366f1']}
+          />
+        }
+        ListHeaderComponent={<CreatePost onSuccess={handleRefresh} />}
+        ListEmptyComponent={
+          !loading && (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No posts yet. Be the first to post!</Text>
+            </View>
+          )
+        }
+      />
+    </View>
   );
 };
 
@@ -144,19 +163,19 @@ const Post = ({ post }) => {
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
+    flex: 1,
+    backgroundColor: '#0f0f0f',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0a0a0a',
-    padding: 20,
+    backgroundColor: '#0f0f0f',
   },
   loadingText: {
-    color: '#94a3b8',
+    marginTop: 16,
     fontSize: 16,
-    marginTop: 12,
+    color: '#fff',
   },
   errorText: {
     color: '#ef4444',
@@ -164,11 +183,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 12,
   },
+  emptyContainer: {
+    padding: 24,
+    alignItems: 'center',
+  },
   emptyText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 12,
+    fontSize: 16,
+    color: '#94a3b8',
+    textAlign: 'center',
   },
   emptySubText: {
     color: '#94a3b8',
