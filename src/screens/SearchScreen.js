@@ -8,7 +8,6 @@ import {
   Text
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { socialService } from '../services/socialService';
 import { UserListItem } from '../components/UserListItem';
 import { useDebounce } from '../hooks/useDebounce';
 

@@ -35,20 +35,15 @@ const Home = ({ navigation }) => {
       {/* Bottom Navigation */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="grid-outline" size={24} color="#6366f1" />
-          <Text style={[styles.navText, styles.activeNavText]}>Board</Text>
+          <Ionicons name="home" size={24} color="#6366f1" />
+          <Text style={[styles.navText, styles.activeNavText]}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="golf-outline" size={24} color="#94a3b8" />
-          <Text style={styles.navText}>Matches</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="wallet-outline" size={24} color="#94a3b8" />
-          <Text style={styles.navText}>Wallet</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="pricetag-outline" size={24} color="#94a3b8" />
-          <Text style={styles.navText}>Promos</Text>
+        <TouchableOpacity 
+          style={styles.navItem}
+          onPress={() => navigation.navigate('Search')}
+        >
+          <Ionicons name="search-outline" size={24} color="#94a3b8" />
+          <Text style={styles.navText}>Search</Text>
         </TouchableOpacity>
         <TouchableOpacity 
           style={styles.navItem}
